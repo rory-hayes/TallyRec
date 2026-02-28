@@ -1,0 +1,19 @@
+[
+  {
+    "account_ref": "ACCT-1",
+    "amount": "50.00",
+    "category": "bank",
+    "code": "BNK-002",
+    "details": {
+      "bank_amount": "9950.00",
+      "bank_id": "bnk-1",
+      "expected_amount": "10000.00",
+      "expected_id": "exp-1"
+    },
+    "event_date": "2025-01-31",
+    "id": "12151702-45de-50d3-82ae-2bdc7194b34c",
+    "message": "Withdrawal amount mismatch",
+    "severity": "blocker",
+    "status": "open"
+  }
+]

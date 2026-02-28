@@ -1,0 +1,16 @@
+[
+  {
+    "account_ref": null,
+    "amount": "10000.00",
+    "category": "bank",
+    "code": "BNK-001",
+    "details": {
+      "expected_id": "exp-1"
+    },
+    "event_date": "2025-01-31",
+    "id": "3b2f961d-2259-5005-9689-7f8a9642ad64",
+    "message": "Expected withdrawal is missing",
+    "severity": "blocker",
+    "status": "open"
+  }
+]

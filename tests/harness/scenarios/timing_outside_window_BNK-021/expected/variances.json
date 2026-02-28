@@ -1,0 +1,17 @@
+[
+  {
+    "account_ref": "ACCT-1",
+    "amount": "10000.00",
+    "category": "bank",
+    "code": "BNK-021",
+    "details": {
+      "bank_id": "bnk-1",
+      "expected_id": "exp-1"
+    },
+    "event_date": "2025-02-06",
+    "id": "28adb978-0ed3-5215-bf98-7ff37455acc6",
+    "message": "Matching withdrawal exists outside configured date window",
+    "severity": "blocker",
+    "status": "open"
+  }
+]

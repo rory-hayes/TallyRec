@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: tally-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install uv && uv sync --extra dev
+    startCommand: uv run uvicorn apps.api.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_ENV
+        value: production
+  - type: worker
+    name: tally-worker
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install uv && uv sync --extra dev
+    startCommand: uv run python -m apps.worker.main
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_ENV
+        value: production

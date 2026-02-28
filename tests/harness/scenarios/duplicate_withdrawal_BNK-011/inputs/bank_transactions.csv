@@ -1,0 +1,3 @@
+id,posted_date,amount_signed,account_ref,description
+bnk-1,2025-01-31,-10000.00,ACCT-1,Duplicate one
+bnk-2,2025-01-31,-10000.00,ACCT-1,Duplicate two

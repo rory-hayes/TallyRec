@@ -1,0 +1,17 @@
+[
+  {
+    "account_ref": "ACCT-9",
+    "amount": "10000.00",
+    "category": "bank",
+    "code": "BNK-031",
+    "details": {
+      "bank_id": "bnk-1",
+      "expected_id": "exp-1"
+    },
+    "event_date": "2025-01-31",
+    "id": "5ada263a-74cc-51e3-9a4a-58747ea59fd9",
+    "message": "Withdrawal was paid from an unexpected account",
+    "severity": "blocker",
+    "status": "open"
+  }
+]

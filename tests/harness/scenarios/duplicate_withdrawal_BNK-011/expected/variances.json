@@ -1,0 +1,37 @@
+[
+  {
+    "account_ref": null,
+    "amount": null,
+    "category": "bank",
+    "code": "AMB-001",
+    "details": {
+      "candidate_bank_ids": [
+        "bnk-1",
+        "bnk-2"
+      ],
+      "expected_id": "exp-1"
+    },
+    "event_date": "2025-01-31",
+    "id": "dec5e0e5-ffdd-5cda-945c-6cb9269c94f0",
+    "message": "Ambiguous one-to-one bank match candidates",
+    "severity": "review",
+    "status": "open"
+  },
+  {
+    "account_ref": "ACCT-1",
+    "amount": "10000.00",
+    "category": "bank",
+    "code": "BNK-011",
+    "details": {
+      "bank_transaction_ids": [
+        "bnk-1",
+        "bnk-2"
+      ]
+    },
+    "event_date": "2025-01-31",
+    "id": "6f1da23e-4cf4-5401-af90-fe5ae3a9d3ea",
+    "message": "Duplicate withdrawals detected",
+    "severity": "blocker",
+    "status": "open"
+  }
+]

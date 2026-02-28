@@ -1,0 +1,105 @@
+:root {
+  --bg: #f4f8f4;
+  --bg-accent: #dcebd8;
+  --ink: #10241a;
+  --muted: #456658;
+  --card: #ffffff;
+  --border: #b8d3bf;
+  --ok: #1f7a3d;
+  --warn: #99612b;
+  --bad: #a31f2b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 10% 10%, var(--bg-accent) 0%, transparent 45%),
+    linear-gradient(140deg, #f9fcf8, var(--bg));
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+h1, h2 {
+  font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.card {
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 14px;
+  padding: 1rem;
+  box-shadow: 0 6px 20px rgba(9, 31, 15, 0.08);
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.badge.tied {
+  background: #d9f2e0;
+  color: var(--ok);
+}
+
+.badge.needs-review {
+  background: #faecd5;
+  color: var(--warn);
+}
+
+.badge.not-tied {
+  background: #f7d9de;
+  color: var(--bad);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  padding: 0.65rem 0.4rem;
+}
+
+.filters {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 1rem;
+}
+
+.filters a {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--ink);
+  background: #fff;
+}
+
+small {
+  color: var(--muted);
+}

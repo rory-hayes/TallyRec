@@ -1,0 +1,17 @@
+[
+  {
+    "bank_ids": [
+      "bnk-1"
+    ],
+    "bank_total": "10000.00",
+    "delta": "0.00",
+    "expected_ids": [
+      "exp-1"
+    ],
+    "expected_total": "10000.00",
+    "group_kind": "one_to_one",
+    "id": "1036749a-3cf5-5b04-b943-c3a0d5ba89ca",
+    "match_confidence": "deterministic",
+    "matched_on": "2025-01-31"
+  }
+]
