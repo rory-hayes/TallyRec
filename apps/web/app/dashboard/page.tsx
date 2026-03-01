@@ -1,5 +1,8 @@
 import Link from "next/link";
 
+import { fetchApiJson } from "../../lib/api";
+import { requireSession } from "../../lib/session";
+
 type SearchParams = {
   status?: string;
   due_before?: string;
@@ -13,37 +16,17 @@ type Params = {
   searchParams?: Promise<SearchParams>;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/v1";
-const DEMO_USER = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
-const DEMO_FIRM = process.env.NEXT_PUBLIC_DEMO_FIRM_ID || "";
-
-async function fetchJson(path: string) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "X-User-Id": DEMO_USER },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    return null;
-  }
-  return res.json();
-}
-
 export default async function DashboardPage({ searchParams }: Params) {
+  const session = await requireSession();
   const resolvedSearchParams = (await searchParams) ?? {};
-
-  if (!DEMO_FIRM) {
-    return (
-      <main>
-        <h1>Bureau Dashboard</h1>
-        <p>
-          <small>Set NEXT_PUBLIC_DEMO_FIRM_ID to load dashboard data.</small>
-        </p>
-      </main>
-    );
-  }
+  const sessionPayload = await fetchApiJson<any>("/session", session);
+  const fallbackFirmId = sessionPayload?.default_firm_id || sessionPayload?.memberships?.[0]?.firm_id || "";
+  const firmId = session.firmId || fallbackFirmId;
 
   const query = new URLSearchParams();
-  query.set("firm_id", DEMO_FIRM);
+  if (firmId) {
+    query.set("firm_id", firmId);
+  }
   if (resolvedSearchParams.status) query.set("status", resolvedSearchParams.status);
   if (resolvedSearchParams.due_before) query.set("due_before", resolvedSearchParams.due_before);
   if (resolvedSearchParams.needs_attention) query.set("needs_attention", resolvedSearchParams.needs_attention);
@@ -51,7 +34,7 @@ export default async function DashboardPage({ searchParams }: Params) {
   if (resolvedSearchParams.limit) query.set("limit", resolvedSearchParams.limit);
   if (resolvedSearchParams.offset) query.set("offset", resolvedSearchParams.offset);
 
-  const payload = await fetchJson(`/dashboard?${query.toString()}`);
+  const payload = firmId ? await fetchApiJson<any>(`/dashboard?${query.toString()}`, session) : null;
   const rows = payload?.runs || [];
   const countsByStatus = payload?.counts_by_status || {};
   const dueCounts = payload?.counts_by_due_bucket || {};
@@ -60,8 +43,9 @@ export default async function DashboardPage({ searchParams }: Params) {
     <main>
       <h1>Bureau Dashboard</h1>
       <p>
-        <small>Firm: {DEMO_FIRM}</small>
+        <small>Firm: {firmId || "not set"}</small>
       </p>
+      {!firmId && <p><small>Set an active firm on /auth or create one on /workspace.</small></p>}
 
       <div className="filters">
         <Link href="/dashboard">All</Link>

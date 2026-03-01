@@ -10,7 +10,14 @@ import pytest
 from fastapi import HTTPException
 
 import apps.api.app.api.routes as routes
-from apps.api.app.schemas.api import CreateBatchRunsRequest, ReconcileBankRequest, RegisterSourceFileRequest, UpdateUKTimingPolicyRequest
+from apps.api.app.schemas.api import (
+    CreateBatchRunsRequest,
+    ReconcileBankRequest,
+    RegisterSourceFileRequest,
+    RemapSourceFileRequest,
+    UpdateUKTimingPolicyRequest,
+    UpsertMappingTemplateRequest,
+)
 
 
 class FakeCursor:
@@ -182,6 +189,265 @@ def test_enqueue_reconcile_bank_with_as_of_date(push_conn) -> None:
     )
     assert str(response["id"]) == str(job_id)
     assert response["job_type"] == "reconcile_bank"
+
+
+def test_session_and_listing_endpoints(push_conn) -> None:
+    user_id = "00000000-0000-0000-0000-00000000b100"
+    firm_id = uuid4()
+    client_id = uuid4()
+    run_id = uuid4()
+    now = datetime.now(timezone.utc)
+
+    push_conn(
+        FakeConn(
+            alls=[
+                [
+                    {
+                        "firm_id": str(firm_id),
+                        "firm_name": "Firm One",
+                        "firm_slug": "firm-one",
+                        "role": "owner",
+                    }
+                ]
+            ]
+        )
+    )
+    session = routes.session_context(user_id=user_id)
+    assert session["default_firm_id"] == str(firm_id)
+    assert session["memberships"][0]["role"] == "owner"
+
+    push_conn(
+        FakeConn(
+            alls=[
+                [
+                    {"id": str(firm_id), "name": "Firm One", "slug": "firm-one", "created_at": now, "role": "owner"},
+                ]
+            ]
+        )
+    )
+    firms = routes.list_firms(user_id=user_id)
+    assert firms[0]["id"] == str(firm_id)
+
+    push_conn(
+        FakeConn(
+            ones=[{"id": str(firm_id), "role": "owner"}],
+            alls=[
+                [
+                    {"id": str(client_id), "firm_id": str(firm_id), "name": "Client One", "external_ref": "C1", "created_at": now},
+                ]
+            ],
+        )
+    )
+    clients = routes.list_clients(firm_id, user_id=user_id)
+    assert clients["clients"][0]["id"] == str(client_id)
+
+    push_conn(
+        FakeConn(
+            ones=[{"role": "owner"}],
+            alls=[
+                [
+                    {
+                        "id": str(run_id),
+                        "firm_id": str(firm_id),
+                        "client_id": str(client_id),
+                        "client_name": "Client One",
+                        "period_start": date(2025, 1, 1),
+                        "period_end": date(2025, 1, 31),
+                        "status": "draft",
+                        "locked_at": None,
+                        "lock_reason": None,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                ]
+            ],
+        )
+    )
+    runs = routes.list_runs(firm_id=firm_id, user_id=user_id)
+    assert runs["total"] == 1
+    assert runs["runs"][0]["id"] == str(run_id)
+
+
+def test_mapping_template_and_source_file_listing(push_conn) -> None:
+    user_id = "00000000-0000-0000-0000-00000000b101"
+    firm_id = uuid4()
+    client_id = uuid4()
+    run_id = uuid4()
+    source_file_id = uuid4()
+    template_id = uuid4()
+    now = datetime.now(timezone.utc)
+
+    push_conn(
+        FakeConn(
+            ones=[{"id": str(run_id)}],
+            alls=[
+                [
+                    {
+                        "id": str(source_file_id),
+                        "run_id": str(run_id),
+                        "file_kind": "bank",
+                        "filename": "bank.csv",
+                        "uri": "s3://bank.csv",
+                        "checksum_sha256": "a" * 64,
+                        "byte_size": 123,
+                        "mapping_template_id": None,
+                        "observed_headers": ["date", "amount"],
+                        "observed_header_hash": "hash",
+                        "import_validation_status": "pending",
+                        "import_health_score": 60,
+                        "created_at": now,
+                    }
+                ]
+            ],
+        )
+    )
+    files = routes.list_source_files(run_id, user_id=user_id)
+    assert files[0]["id"] == str(source_file_id)
+
+    push_conn(
+        FakeConn(
+            ones=[
+                {"id": str(client_id), "firm_id": str(firm_id)},
+                {"role": "owner"},
+                {
+                    "id": str(template_id),
+                    "firm_id": str(firm_id),
+                    "client_id": str(client_id),
+                    "name": "Bank Map",
+                    "file_kind": "bank",
+                    "mapping": {"date": "date"},
+                    "expected_headers": ["date", "amount"],
+                    "expected_header_hash": "h",
+                    "created_at": now,
+                },
+            ]
+        )
+    )
+    template = routes.upsert_mapping_template(
+        client_id,
+        UpsertMappingTemplateRequest(
+            name="Bank Map",
+            file_kind="bank",
+            mapping={"date": "date"},
+            expected_headers=["date", "amount"],
+        ),
+        user_id=user_id,
+    )
+    assert template["id"] == str(template_id)
+
+    push_conn(
+        FakeConn(
+            ones=[{"id": str(client_id), "firm_id": str(firm_id)}],
+            alls=[
+                [
+                    {
+                        "id": str(template_id),
+                        "firm_id": str(firm_id),
+                        "client_id": str(client_id),
+                        "name": "Bank Map",
+                        "file_kind": "bank",
+                        "mapping": {"date": "date"},
+                        "expected_headers": ["date", "amount"],
+                        "expected_header_hash": "h",
+                        "created_at": now,
+                    }
+                ]
+            ],
+        )
+    )
+    templates = routes.list_mapping_templates(client_id, user_id=user_id)
+    assert templates[0]["id"] == str(template_id)
+
+
+def test_remap_source_file_and_ops_queue_stats(push_conn, monkeypatch: pytest.MonkeyPatch) -> None:
+    user_id = "00000000-0000-0000-0000-00000000b102"
+    firm_id = uuid4()
+    client_id = uuid4()
+    run_id = uuid4()
+    source_file_id = uuid4()
+    template_id = uuid4()
+    now = datetime.now(timezone.utc)
+
+    monkeypatch.setattr(routes, "_upsert_run_import_health_summary", lambda *_args, **_kwargs: {"ok": True})
+
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": str(source_file_id),
+                    "run_id": str(run_id),
+                    "file_kind": "bank",
+                    "observed_headers": ["posted_on", "amount"],
+                    "firm_id": str(firm_id),
+                    "client_id": str(client_id),
+                    "locked_at": None,
+                },
+                {"role": "owner"},
+                {"id": str(template_id), "expected_headers": ["date", "amount"], "expected_header_hash": "expected"},
+                {
+                    "id": str(source_file_id),
+                    "run_id": str(run_id),
+                    "file_kind": "bank",
+                    "filename": "bank.csv",
+                    "uri": "s3://bank.csv",
+                    "checksum_sha256": "a" * 64,
+                    "mapping_template_id": str(template_id),
+                    "observed_headers": ["date", "amount"],
+                    "observed_header_hash": "expected",
+                    "import_validation_status": "validated",
+                    "import_health_score": 100,
+                    "created_at": now,
+                },
+            ]
+        )
+    )
+    remapped = routes.remap_source_file(
+        source_file_id,
+        RemapSourceFileRequest(mapping_template_id=template_id, observed_headers=["date", "amount"]),
+        user_id=user_id,
+    )
+    assert remapped["import_validation_status"] == "validated"
+
+    push_conn(
+        FakeConn(
+            alls=[
+                [
+                    {"status": "queued", "total": 2},
+                    {"status": "running", "total": 1},
+                    {"status": "failed", "total": 0},
+                    {"status": "succeeded", "total": 4},
+                ]
+            ],
+            ones=[{"queued_at": now}],
+        )
+    )
+    stats = routes.queue_stats(user_id=user_id)
+    assert stats["counts"]["queued"] == 2
+    assert stats["oldest_queued_at"] == now
+
+    class _ReadyCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+        def fetchone(self):
+            return {"ok": 1}
+
+    class _ReadyConn:
+        def cursor(self):
+            return _ReadyCursor()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(routes.Connection, "connect", lambda *_args, **_kwargs: _ReadyConn())
+    ready = routes.ready()
+    assert ready["status"] == "ready"
 
 
 def _batch_row(batch_id: UUID, firm_id: UUID, *, status: str, now: datetime, requested_clients: int = 1, created_runs: int = 0, queued_jobs: int = 0, succeeded_runs: int = 0, failed_runs: int = 0) -> dict[str, Any]:

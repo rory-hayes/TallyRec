@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import time
 from datetime import date, datetime, timezone
@@ -25,6 +26,12 @@ from libs.core.engine import (
 from libs.core.utils import build_export_pack, compute_import_health_score, get_storage_client
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/postgres")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("tally.worker")
+
+
+def _log(event: str, **payload: Any) -> None:
+    logger.info(json.dumps({"event": event, **payload}, sort_keys=True, default=str))
 
 
 def _connect() -> Connection:
@@ -919,6 +926,13 @@ def process_job(conn: Connection, job: dict[str, Any]) -> None:
     run_id = str(job["run_id"])
     firm_id = str(job["firm_id"])
     client_id = str(job["client_id"])
+    _log(
+        "worker.job.processing",
+        job_id=str(job["id"]),
+        job_type=job["job_type"],
+        run_id=run_id,
+        attempt=job.get("attempt_count"),
+    )
 
     if job["job_type"] == "noop":
         if _run_locked(conn, run_id):
@@ -1168,12 +1182,28 @@ def run_once() -> bool:
             job = claim_next_job(conn)
             if not job:
                 conn.commit()
+                _log("worker.queue.idle")
                 return False
             # Persist claim transition (queued -> running + attempt increment)
             # before processing to avoid losing retry state on handler errors.
             conn.commit()
+            started = time.perf_counter()
+            _log(
+                "worker.job.claimed",
+                job_id=str(job.get("id")),
+                job_type=job.get("job_type"),
+                run_id=str(job.get("run_id")) if job.get("run_id") is not None else None,
+            )
             with conn.transaction():
                 process_job(conn, job)
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+            _log(
+                "worker.job.succeeded",
+                job_id=str(job.get("id")),
+                job_type=job.get("job_type"),
+                run_id=str(job.get("run_id")) if job.get("run_id") is not None else None,
+                elapsed_ms=elapsed_ms,
+            )
             return True
         except Exception as exc:
             conn.rollback()
@@ -1196,6 +1226,14 @@ def run_once() -> bool:
                         _mark_job_failed(conn, job, exc)
             except Exception:
                 conn.rollback()
+            _log(
+                "worker.job.failed",
+                job_id=str(job.get("id")) if job else None,
+                job_type=job.get("job_type") if job else None,
+                run_id=str(job.get("run_id")) if job and job.get("run_id") is not None else None,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             # A job was claimed even if processing failed; signal work happened
             # so caller loops can continue draining/retrying the queue.
             return job is not None

@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from psycopg import Connection
 
+from apps.api.app.core.config import settings
 from apps.api.app.db import db_session
 from apps.api.app.schemas.api import (
     ApproveRunRequest,
@@ -29,8 +30,10 @@ from apps.api.app.schemas.api import (
     ReconcileGLRequest,
     RegisterSourceFileRequest,
     RegisterSourceFileResponse,
+    RemapSourceFileRequest,
     ResolveVarianceRequest,
     UnlockRunRequest,
+    UpsertMappingTemplateRequest,
     UpdateReconPolicyRequest,
     UpdateUKTimingPolicyRequest,
     UpsertGLBucketAccountsRequest,
@@ -111,6 +114,13 @@ def _membership_role(conn: Connection, firm_id: str, user_id: str) -> str | None
         )
         row = cur.fetchone()
         return row["role"] if row else None
+
+
+def _require_membership_role(conn: Connection, firm_id: str, user_id: str, allowed_roles: set[str], detail: str) -> str:
+    role = _membership_role(conn, firm_id, user_id)
+    if role not in allowed_roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    return role or "viewer"
 
 
 def _ensure_run_unlocked(conn: Connection, run: dict[str, Any], user_id: str) -> None:
@@ -330,6 +340,115 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/ready")
+def ready() -> Any:
+    try:
+        conn = Connection.connect(settings.database_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("select 1")
+                cur.fetchone()
+        finally:
+            conn.close()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"database unavailable: {exc}") from exc
+    return {"status": "ready", "database": "ok"}
+
+
+@router.get("/ops/queue-stats")
+def queue_stats(user_id: str = Depends(get_user_id)) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select status, count(*)::int as total
+                from public.jobs
+                group by status
+                """
+            )
+            rows = cur.fetchall()
+            counts = {row["status"]: int(row["total"]) for row in rows}
+            cur.execute(
+                """
+                select queued_at
+                from public.jobs
+                where status = 'queued'
+                order by queued_at
+                limit 1
+                """
+            )
+            oldest = cur.fetchone()
+    return {
+        "counts": {
+            "queued": counts.get("queued", 0),
+            "running": counts.get("running", 0),
+            "succeeded": counts.get("succeeded", 0),
+            "failed": counts.get("failed", 0),
+        },
+        "oldest_queued_at": oldest["queued_at"] if oldest else None,
+    }
+
+
+@router.get("/session")
+def session_context(user_id: str = Depends(get_user_id)) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select fm.firm_id, f.name as firm_name, f.slug as firm_slug, fm.role
+                from public.firm_memberships fm
+                join public.firms f on f.id = fm.firm_id
+                where fm.user_id = %s::uuid
+                order by f.created_at, f.id
+                """,
+                (user_id,),
+            )
+            memberships = [dict(row) for row in cur.fetchall()]
+    return {
+        "user_id": user_id,
+        "memberships": memberships,
+        "default_firm_id": memberships[0]["firm_id"] if memberships else None,
+    }
+
+
+@router.get("/firms")
+def list_firms(user_id: str = Depends(get_user_id)) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select f.id, f.name, f.slug, f.created_at, fm.role
+                from public.firms f
+                join public.firm_memberships fm on fm.firm_id = f.id
+                where fm.user_id = %s::uuid
+                order by f.created_at desc, f.id desc
+                """,
+                (user_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+@router.get("/firms/{firm_id}/clients")
+def list_clients(firm_id: UUID, user_id: str = Depends(get_user_id)) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, role from public.firm_memberships where firm_id = %s and user_id = %s::uuid", (str(firm_id), user_id))
+            membership = cur.fetchone()
+            if not membership:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Firm not found")
+            cur.execute(
+                """
+                select id, firm_id, name, external_ref, created_at
+                from public.clients
+                where firm_id = %s
+                order by created_at desc, id desc
+                """,
+                (str(firm_id),),
+            )
+            clients = [dict(row) for row in cur.fetchall()]
+    return {"firm_id": str(firm_id), "role": membership["role"], "clients": clients}
+
+
 @router.post("/firms", response_model=CreateFirmResponse, status_code=status.HTTP_201_CREATED)
 def create_firm(payload: CreateFirmRequest, user_id: str = Depends(get_user_id)) -> Any:
     firm_id = str(uuid4())
@@ -451,6 +570,45 @@ def create_run(payload: CreateRunRequest, user_id: str = Depends(get_user_id)) -
             entity_id=str(run["id"]),
         )
         return run
+
+
+@router.get("/runs")
+def list_runs(
+    firm_id: UUID,
+    client_id: UUID | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user_id: str = Depends(get_user_id),
+) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute("select role from public.firm_memberships where firm_id = %s and user_id = %s::uuid", (str(firm_id), user_id))
+            membership = cur.fetchone()
+            if not membership:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Firm not found")
+            filters = ["r.firm_id = %s"]
+            values: list[Any] = [str(firm_id)]
+            if client_id:
+                filters.append("r.client_id = %s")
+                values.append(str(client_id))
+            if status_filter:
+                filters.append("r.status = %s::app.run_status")
+                values.append(status_filter)
+            cur.execute(
+                f"""
+                select r.id, r.firm_id, r.client_id, c.name as client_name, r.period_start, r.period_end,
+                       r.status, r.locked_at, r.lock_reason, r.created_at, r.updated_at
+                from public.runs r
+                join public.clients c on c.id = r.client_id
+                where {' and '.join(filters)}
+                order by r.created_at desc, r.id desc
+                limit %s offset %s
+                """,
+                tuple(values + [limit, offset]),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+    return {"firm_id": str(firm_id), "role": membership["role"], "runs": rows, "total": len(rows)}
 
 
 @router.post("/runs/{run_id}/source-files", response_model=RegisterSourceFileResponse, status_code=status.HTTP_201_CREATED)
@@ -578,6 +736,200 @@ def register_source_file(run_id: UUID, payload: RegisterSourceFileRequest, user_
             payload={"import_validation_status": validation_status},
         )
         return source_file
+
+
+@router.get("/runs/{run_id}/source-files")
+def list_source_files(run_id: UUID, user_id: str = Depends(get_user_id)) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id from public.runs where id = %s", (str(run_id),))
+            run = cur.fetchone()
+            if not run:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+            cur.execute(
+                """
+                select id, run_id, file_kind, filename, uri, checksum_sha256, byte_size,
+                       mapping_template_id, observed_headers, observed_header_hash,
+                       import_validation_status, import_health_score, created_at
+                from public.source_files
+                where run_id = %s
+                order by created_at desc, id desc
+                """,
+                (str(run_id),),
+            )
+            files = [dict(row) for row in cur.fetchall()]
+    return files
+
+
+@router.post("/source-files/{source_file_id}/remap")
+def remap_source_file(source_file_id: UUID, payload: RemapSourceFileRequest, user_id: str = Depends(get_user_id)) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select sf.id, sf.run_id, sf.file_kind, sf.observed_headers,
+                       r.firm_id, r.client_id, r.locked_at
+                from public.source_files sf
+                join public.runs r on r.id = sf.run_id
+                where sf.id = %s
+                """,
+                (str(source_file_id),),
+            )
+            source_file = cur.fetchone()
+            if not source_file:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source file not found")
+
+            run = {
+                "id": source_file["run_id"],
+                "firm_id": source_file["firm_id"],
+                "client_id": source_file["client_id"],
+                "locked_at": source_file["locked_at"],
+            }
+            _ensure_run_unlocked(conn, run, user_id)
+            _require_membership_role(conn, str(source_file["firm_id"]), user_id, PREPARER_ROLES, "Preparer role required")
+
+            cur.execute(
+                """
+                select id, expected_headers, expected_header_hash
+                from public.mapping_templates
+                where id = %s and firm_id = %s and file_kind = %s::app.file_kind
+                """,
+                (str(payload.mapping_template_id), str(source_file["firm_id"]), source_file["file_kind"]),
+            )
+            template = cur.fetchone()
+            if not template:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping template not found")
+
+            observed_headers_raw = payload.observed_headers
+            if observed_headers_raw is None:
+                observed_headers_raw = list(source_file.get("observed_headers") or [])
+            observed_headers = normalize_headers(observed_headers_raw)
+            observed_hash = headers_hash(observed_headers) if observed_headers else None
+            expected_headers = normalize_headers(list(template["expected_headers"] or []))
+            expected_hash = template["expected_header_hash"] or (headers_hash(expected_headers) if expected_headers else None)
+            validation_status = "pending"
+            if observed_hash and expected_hash:
+                validation_status = "validated" if observed_hash == expected_hash else "blocked_drift"
+
+            cur.execute(
+                """
+                update public.source_files
+                set mapping_template_id = %s,
+                    observed_headers = %s::jsonb,
+                    observed_header_hash = %s,
+                    import_validation_status = %s,
+                    import_health_score = %s
+                where id = %s
+                returning id, run_id, file_kind, filename, uri, checksum_sha256,
+                          mapping_template_id, observed_headers, observed_header_hash,
+                          import_validation_status, import_health_score, created_at
+                """,
+                (
+                    str(payload.mapping_template_id),
+                    json.dumps(observed_headers) if observed_headers else None,
+                    observed_hash,
+                    validation_status,
+                    _score_source_file_validation(validation_status),
+                    str(source_file_id),
+                ),
+            )
+            updated_source_file = cur.fetchone()
+
+            if validation_status == "blocked_drift":
+                drift_details = {
+                    "source_file_id": str(source_file_id),
+                    "mapping_template_id": str(payload.mapping_template_id),
+                    "expected_headers": expected_headers,
+                    "observed_headers": observed_headers,
+                    "expected_header_hash": expected_hash,
+                    "observed_header_hash": observed_hash,
+                }
+                cur.execute(
+                    """
+                    select id
+                    from public.variances
+                    where run_id = %s
+                      and category = 'import'
+                      and code = 'IMP-001'
+                      and status = 'open'
+                      and details ->> 'source_file_id' = %s
+                    limit 1
+                    """,
+                    (str(source_file["run_id"]), str(source_file_id)),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    cur.execute(
+                        """
+                        update public.variances
+                        set details = %s::jsonb,
+                            changed_by = %s::uuid,
+                            changed_at = now()
+                        where id = %s
+                        """,
+                        (json.dumps(drift_details, sort_keys=True), user_id, str(existing["id"])),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        insert into public.variances(
+                          run_id, firm_id, client_id, code, category, severity, status,
+                          message, details
+                        )
+                        values (%s, %s, %s, 'IMP-001', 'import', 'blocker', 'open', %s, %s::jsonb)
+                        """,
+                        (
+                            str(source_file["run_id"]),
+                            str(source_file["firm_id"]),
+                            str(source_file["client_id"]),
+                            "Source file headers drifted from expected mapping template",
+                            json.dumps(drift_details, sort_keys=True),
+                        ),
+                    )
+            else:
+                cur.execute(
+                    """
+                    update public.variances
+                    set status = 'resolved',
+                        resolution_action = 'matched',
+                        note = 'Resolved by source-file remap',
+                        changed_by = %s::uuid,
+                        changed_at = now(),
+                        resolved_at = now(),
+                        resolved_by = %s::uuid
+                    where run_id = %s
+                      and category = 'import'
+                      and code = 'IMP-001'
+                      and status = 'open'
+                      and details ->> 'source_file_id' = %s
+                    """,
+                    (user_id, user_id, str(source_file["run_id"]), str(source_file_id)),
+                )
+
+        _upsert_run_import_health_summary(
+            conn,
+            run_id=str(source_file["run_id"]),
+            firm_id=str(source_file["firm_id"]),
+            client_id=str(source_file["client_id"]),
+            actor_user_id=user_id,
+        )
+        _audit(
+            conn,
+            firm_id=str(source_file["firm_id"]),
+            client_id=str(source_file["client_id"]),
+            run_id=str(source_file["run_id"]),
+            event_type="source_file.remapped",
+            actor_user_id=user_id,
+            entity_type="source_file",
+            entity_id=str(source_file_id),
+            payload={
+                "mapping_template_id": str(payload.mapping_template_id),
+                "import_validation_status": validation_status,
+                "observed_header_hash": observed_hash,
+                "expected_header_hash": expected_hash,
+            },
+        )
+        return dict(updated_source_file)
 
 
 @router.post("/runs/{run_id}/jobs", response_model=EnqueueJobResponse, status_code=status.HTTP_201_CREATED)
@@ -731,6 +1083,8 @@ def run_summary(run_id: UUID, user_id: str = Depends(get_user_id)) -> Any:
 
         return {
             "run_id": str(row["id"]),
+            "firm_id": str(row["firm_id"]),
+            "client_id": str(row["client_id"]),
             "run_status": row["run_status"],
             "locked": row["locked_at"] is not None,
             "locked_at": row["locked_at"],
@@ -1086,6 +1440,89 @@ def list_match_groups(run_id: UUID, user_id: str = Depends(get_user_id)) -> Any:
                 (str(run_id),),
             )
             return [dict(item) for item in cur.fetchall()]
+
+
+@router.get("/clients/{client_id}/mapping-templates")
+def list_mapping_templates(
+    client_id: UUID,
+    file_kind: str | None = None,
+    user_id: str = Depends(get_user_id),
+) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, firm_id from public.clients where id = %s", (str(client_id),))
+            client = cur.fetchone()
+            if not client:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+            filters = ["firm_id = %s", "(client_id = %s or client_id is null)"]
+            values: list[Any] = [str(client["firm_id"]), str(client_id)]
+            if file_kind:
+                filters.append("file_kind = %s::app.file_kind")
+                values.append(file_kind)
+            cur.execute(
+                f"""
+                select id, firm_id, client_id, name, file_kind, mapping, expected_headers, expected_header_hash, created_at
+                from public.mapping_templates
+                where {' and '.join(filters)}
+                order by file_kind, name, id
+                """,
+                tuple(values),
+            )
+            templates = [dict(row) for row in cur.fetchall()]
+    return templates
+
+
+@router.post("/clients/{client_id}/mapping-templates", status_code=status.HTTP_201_CREATED)
+def upsert_mapping_template(
+    client_id: UUID,
+    payload: UpsertMappingTemplateRequest,
+    user_id: str = Depends(get_user_id),
+) -> Any:
+    with db_session(user_id) as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, firm_id from public.clients where id = %s", (str(client_id),))
+            client = cur.fetchone()
+            if not client:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+            _require_membership_role(conn, str(client["firm_id"]), user_id, PREPARER_ROLES, "Preparer role required")
+            expected_headers = normalize_headers(payload.expected_headers or [])
+            expected_hash = headers_hash(expected_headers) if expected_headers else None
+            cur.execute(
+                """
+                insert into public.mapping_templates(
+                  firm_id, client_id, name, file_kind, mapping, expected_headers, expected_header_hash
+                )
+                values (%s, %s, %s, %s::app.file_kind, %s::jsonb, %s::jsonb, %s)
+                on conflict (firm_id, name, file_kind)
+                do update set client_id = excluded.client_id,
+                              mapping = excluded.mapping,
+                              expected_headers = excluded.expected_headers,
+                              expected_header_hash = excluded.expected_header_hash
+                returning id, firm_id, client_id, name, file_kind, mapping, expected_headers, expected_header_hash, created_at
+                """,
+                (
+                    str(client["firm_id"]),
+                    str(client_id),
+                    payload.name,
+                    payload.file_kind,
+                    json.dumps(payload.mapping, sort_keys=True),
+                    json.dumps(expected_headers) if expected_headers else None,
+                    expected_hash,
+                ),
+            )
+            template = cur.fetchone()
+        _audit(
+            conn,
+            firm_id=str(client["firm_id"]),
+            client_id=str(client_id),
+            run_id=None,
+            event_type="mapping_template.upserted",
+            actor_user_id=user_id,
+            entity_type="mapping_template",
+            entity_id=str(template["id"]),
+            payload={"file_kind": payload.file_kind, "expected_header_hash": expected_hash},
+        )
+        return dict(template)
 
 
 @router.patch("/clients/{client_id}/recon-policy")

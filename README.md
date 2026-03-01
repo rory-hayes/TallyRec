@@ -49,12 +49,30 @@ uv run pytest --cov=apps --cov=libs --cov-report=term-missing --cov-fail-under=9
 uv run python scripts/run_golden.py
 ```
 
+```bash
+./scripts/release_gate.sh
+```
+
+```bash
+cd apps/web
+npm ci
+npm run test:e2e
+```
+
 ## Key API Endpoints
 
 - `POST /v1/firms`
+- `GET /v1/session`
+- `GET /v1/firms`
+- `GET /v1/firms/{firm_id}/clients`
 - `POST /v1/clients`
 - `POST /v1/runs`
+- `GET /v1/runs?firm_id=...`
 - `POST /v1/runs/{run_id}/source-files`
+- `GET /v1/runs/{run_id}/source-files`
+- `POST /v1/source-files/{source_file_id}/remap`
+- `POST /v1/clients/{client_id}/mapping-templates`
+- `GET /v1/clients/{client_id}/mapping-templates`
 - `POST /v1/runs/{run_id}/jobs`
 - `POST /v1/runs/{run_id}/reconcile/bank`
 - `POST /v1/runs/{run_id}/reconcile/gl`
@@ -74,6 +92,7 @@ uv run python scripts/run_golden.py
 - `POST /v1/batches/runs`
 - `GET /v1/batches/{batch_id}`
 - `GET /v1/dashboard`
+- `GET /v1/ops/queue-stats`
 - `POST /v1/runs/{run_id}/ready-for-review`
 - `POST /v1/runs/{run_id}/approve`
 - `POST /v1/runs/{run_id}/unlock`
@@ -88,3 +107,4 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
 
 - Applies migrations to a fresh Postgres database.
 - Runs unit, DB, integration, harness, and determinism tests.
+- Runs Playwright browser E2E against local API + Next.js web app.

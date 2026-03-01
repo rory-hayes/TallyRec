@@ -1,27 +1,16 @@
 import Link from "next/link";
 import { ResolutionPanel } from "./resolution-panel";
+import { fetchApiJson } from "../../../../../lib/api";
+import { requireSession } from "../../../../../lib/session";
 
 type Params = {
   params: Promise<{ runId: string; varianceId: string }>;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/v1";
-const DEMO_USER = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
-
-async function fetchJson(path: string) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "X-User-Id": DEMO_USER },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    return null;
-  }
-  return res.json();
-}
-
 export default async function VarianceDetailPage({ params }: Params) {
+  const session = await requireSession();
   const { runId, varianceId } = await params;
-  const variance = await fetchJson(`/runs/${runId}/variances/${varianceId}`);
+  const variance = await fetchApiJson<any>(`/runs/${runId}/variances/${varianceId}`, session);
 
   if (!variance) {
     return (
@@ -56,6 +45,7 @@ export default async function VarianceDetailPage({ params }: Params) {
       <ResolutionPanel
         runId={runId}
         varianceId={varianceId}
+        userId={session.userId}
         currentStatus={variance.status}
         requiresReviewerApproval={Boolean(variance.ignored_needs_reviewer_approval)}
       />

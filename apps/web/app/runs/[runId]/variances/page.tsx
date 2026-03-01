@@ -1,25 +1,14 @@
 import Link from "next/link";
+import { fetchApiJson } from "../../../../lib/api";
+import { requireSession } from "../../../../lib/session";
 
 type Params = {
   params: Promise<{ runId: string }>;
   searchParams?: Promise<{ status?: string; category?: string; code?: string }>;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/v1";
-const DEMO_USER = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
-
-async function fetchJson(path: string) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "X-User-Id": DEMO_USER },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    return null;
-  }
-  return res.json();
-}
-
 export default async function VarianceCenterPage({ params, searchParams }: Params) {
+  const session = await requireSession();
   const { runId } = await params;
   const resolvedSearchParams = (await searchParams) ?? {};
   const status = resolvedSearchParams.status || "open";
@@ -31,7 +20,7 @@ export default async function VarianceCenterPage({ params, searchParams }: Param
   if (category) query.set("category", category);
   if (code) query.set("code", code);
 
-  const variances = (await fetchJson(`/runs/${runId}/variances?${query.toString()}`)) || [];
+  const variances = (await fetchApiJson<any[]>(`/runs/${runId}/variances?${query.toString()}`, session)) || [];
 
   return (
     <main>

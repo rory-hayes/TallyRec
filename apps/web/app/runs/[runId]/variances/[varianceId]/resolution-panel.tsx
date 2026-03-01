@@ -3,16 +3,16 @@
 import { useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/v1";
-const DEMO_USER = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
 
 type Props = {
   varianceId: string;
   runId: string;
+  userId: string;
   currentStatus: string;
   requiresReviewerApproval: boolean;
 };
 
-export function ResolutionPanel({ varianceId, runId, currentStatus, requiresReviewerApproval }: Props) {
+export function ResolutionPanel({ varianceId, runId, userId, currentStatus, requiresReviewerApproval }: Props) {
   const [note, setNote] = useState("Reviewed in Sprint 3 workflow");
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
@@ -25,7 +25,7 @@ export function ResolutionPanel({ varianceId, runId, currentStatus, requiresRevi
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-User-Id": DEMO_USER,
+          "X-User-Id": userId,
         },
         body: JSON.stringify({ action, note }),
       });
@@ -48,7 +48,7 @@ export function ResolutionPanel({ varianceId, runId, currentStatus, requiresRevi
     try {
       const res = await fetch(`${API_BASE}/variances/${varianceId}/approve-ignored`, {
         method: "POST",
-        headers: { "X-User-Id": DEMO_USER },
+        headers: { "X-User-Id": userId },
       });
       const body = await res.json();
       if (!res.ok) {

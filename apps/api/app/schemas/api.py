@@ -208,3 +208,15 @@ class UpdateUKTimingPolicyRequest(StrictModel):
     bacs_visibility_business_days: int | None = Field(default=None, ge=0, le=10)
     holiday_calendar: str | None = None
     enabled: bool | None = None
+
+
+class UpsertMappingTemplateRequest(StrictModel):
+    name: str
+    file_kind: str
+    mapping: dict[str, Any] = Field(default_factory=dict)
+    expected_headers: list[str] | None = None
+
+
+class RemapSourceFileRequest(StrictModel):
+    mapping_template_id: UUID
+    observed_headers: list[str] | None = None

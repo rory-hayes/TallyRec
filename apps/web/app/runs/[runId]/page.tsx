@@ -1,23 +1,12 @@
 import Link from "next/link";
+import { RunActions } from "./run-actions";
+import { fetchApiJson } from "../../../lib/api";
+import { requireSession } from "../../../lib/session";
 
 type Params = {
   params: Promise<{ runId: string }>;
   searchParams?: Promise<{ severity?: string; status?: string; code?: string }>;
 };
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/v1";
-const DEMO_USER = process.env.NEXT_PUBLIC_DEMO_USER_ID || "00000000-0000-0000-0000-000000000001";
-
-async function fetchJson(path: string) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "X-User-Id": DEMO_USER },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    return null;
-  }
-  return res.json();
-}
 
 function statusClass(status?: string | null) {
   if (status === "Tied") return "badge tied";
@@ -26,13 +15,14 @@ function statusClass(status?: string | null) {
 }
 
 export default async function RunPage({ params, searchParams }: Params) {
+  const session = await requireSession();
   const { runId } = await params;
   const resolvedSearchParams = (await searchParams) ?? {};
   const filterStatus = resolvedSearchParams.status || "open";
-  const summary = await fetchJson(`/runs/${runId}/summary`);
-  const tieout = await fetchJson(`/runs/${runId}/bank-tieout`);
-  const variances = (await fetchJson(`/runs/${runId}/variances?category=bank&status=${filterStatus}`)) || [];
-  const matchGroups = (await fetchJson(`/runs/${runId}/match-groups`)) || [];
+  const summary = await fetchApiJson<any>(`/runs/${runId}/summary`, session);
+  const tieout = await fetchApiJson<any>(`/runs/${runId}/bank-tieout`, session);
+  const variances = (await fetchApiJson<any[]>(`/runs/${runId}/variances?category=bank&status=${filterStatus}`, session)) || [];
+  const matchGroups = (await fetchApiJson<any[]>(`/runs/${runId}/match-groups`, session)) || [];
 
   return (
     <main>
@@ -120,6 +110,7 @@ export default async function RunPage({ params, searchParams }: Params) {
           <Link href={`/runs/${runId}?status=resolved`}>Resolved</Link>
           <Link href={`/runs/${runId}`}>Reset</Link>
           <Link href={`/runs/${runId}/variances`}>Open Variance Center</Link>
+          <Link href={`/runs/${runId}/imports`}>Import Mapping</Link>
           <Link href="/dashboard">Dashboard</Link>
         </div>
         <table>
@@ -154,6 +145,8 @@ export default async function RunPage({ params, searchParams }: Params) {
           </tbody>
         </table>
       </section>
+
+      <RunActions runId={runId} userId={session.userId} locked={Boolean(summary?.locked)} />
     </main>
   );
 }
