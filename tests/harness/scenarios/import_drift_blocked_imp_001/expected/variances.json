@@ -1,0 +1,28 @@
+[
+  {
+    "account_ref": null,
+    "amount": null,
+    "category": "import",
+    "code": "IMP-001",
+    "details": {
+      "expected_header_hash": "exp-hash",
+      "expected_headers": [
+        "date",
+        "amount",
+        "account"
+      ],
+      "observed_header_hash": "obs-hash",
+      "observed_headers": [
+        "posted_on",
+        "amount",
+        "acct"
+      ],
+      "source_file_id": "src-imp-1"
+    },
+    "event_date": null,
+    "id": "c165c10c-c2eb-51f7-83b0-a0f2e58e3143",
+    "message": "Source file headers drifted from expected mapping template",
+    "severity": "blocker",
+    "status": "open"
+  }
+]

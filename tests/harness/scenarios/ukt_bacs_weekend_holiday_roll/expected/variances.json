@@ -1,0 +1,22 @@
+[
+  {
+    "account_ref": null,
+    "amount": "900.00",
+    "category": "bank",
+    "code": "UKT-001",
+    "details": {
+      "as_of_date": "2025-12-28",
+      "due_date": "2025-12-22",
+      "expected_amount": "900.00",
+      "liability_type": "taxes",
+      "period_end": "2025-11-30",
+      "reason": "Liability not yet expected to be visible in bank data until 2025-12-29 (Bacs + business-day lag)",
+      "visibility_date": "2025-12-29"
+    },
+    "event_date": "2025-12-22",
+    "id": "ee4da312-28ee-5cd9-8cc0-41a34e64d08d",
+    "message": "Liability payment expected later under UK timing policy",
+    "severity": "review",
+    "status": "open"
+  }
+]

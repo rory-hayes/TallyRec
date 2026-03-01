@@ -1,0 +1,19 @@
+{
+  "payroll_expected": [
+    {"id": "exp-1", "payment_date": "2025-01-31", "net_amount": "100.00", "tax_amount": "20.00", "pension_amount": "10.00", "other_amount": "5.00"}
+  ],
+  "gl_lines": [
+    {"id": "gl-1", "entry_date": "2025-01-31", "account_code": "2200", "debit_amount": "0.00", "credit_amount": "100.00"},
+    {"id": "gl-2", "entry_date": "2025-01-31", "account_code": "2210", "debit_amount": "0.00", "credit_amount": "20.00"},
+    {"id": "gl-3", "entry_date": "2025-01-31", "account_code": "2220", "debit_amount": "0.00", "credit_amount": "10.00"},
+    {"id": "gl-4", "entry_date": "2025-01-31", "account_code": "2230", "debit_amount": "0.00", "credit_amount": "5.00"},
+    {"id": "gl-5", "entry_date": "2025-01-31", "account_code": "1000", "debit_amount": "135.00", "credit_amount": "0.00"}
+  ],
+  "bucket_accounts": {
+    "net_pay_control": ["2200"],
+    "taxes": ["2210"],
+    "pension": ["2220"],
+    "other": ["2230"]
+  },
+  "tolerance": "0.01"
+}

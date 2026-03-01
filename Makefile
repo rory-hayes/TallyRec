@@ -6,7 +6,7 @@ db-migrate:
 	supabase migration up --db-url "$(DB_URL)" --include-all
 
 test:
-	uv run pytest tests/unit tests/integration tests/db
+	uv run pytest --cov=apps --cov=libs --cov-report=term-missing --cov-fail-under=95 tests/unit tests/integration tests/db tests/harness
 
 golden:
 	uv run pytest tests/harness

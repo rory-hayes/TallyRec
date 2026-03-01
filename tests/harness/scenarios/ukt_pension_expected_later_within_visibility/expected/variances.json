@@ -1,0 +1,22 @@
+[
+  {
+    "account_ref": null,
+    "amount": "800.00",
+    "category": "bank",
+    "code": "UKT-001",
+    "details": {
+      "as_of_date": "2025-02-25",
+      "due_date": "2025-02-22",
+      "expected_amount": "800.00",
+      "liability_type": "pension",
+      "period_end": "2025-01-31",
+      "reason": "Liability not yet expected to be visible in bank data until 2025-02-26 (Bacs + business-day lag)",
+      "visibility_date": "2025-02-26"
+    },
+    "event_date": "2025-02-22",
+    "id": "bd782e2d-5a2a-56c2-98e2-d83f156bb771",
+    "message": "Liability payment expected later under UK timing policy",
+    "severity": "review",
+    "status": "open"
+  }
+]

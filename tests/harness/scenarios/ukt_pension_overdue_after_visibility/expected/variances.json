@@ -1,0 +1,23 @@
+[
+  {
+    "account_ref": null,
+    "amount": "800.00",
+    "category": "bank",
+    "code": "UKT-002",
+    "details": {
+      "as_of_date": "2025-02-27",
+      "days_overdue": 1,
+      "due_date": "2025-02-22",
+      "expected_amount": "800.00",
+      "liability_type": "pension",
+      "period_end": "2025-01-31",
+      "reason": "Liability payment overdue after visibility date 2025-02-26",
+      "visibility_date": "2025-02-26"
+    },
+    "event_date": "2025-02-22",
+    "id": "47160026-ce8b-5287-ac17-c8d50b16a3e3",
+    "message": "Liability payment overdue under UK timing policy",
+    "severity": "blocker",
+    "status": "open"
+  }
+]

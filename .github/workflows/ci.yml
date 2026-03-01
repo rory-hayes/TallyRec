@@ -47,17 +47,5 @@ jobs:
       - name: Apply migrations
         run: supabase migration up --db-url "$TEST_DATABASE_URL" --include-all
 
-      - name: Run unit tests
-        run: uv run pytest tests/unit -q
-
-      - name: Run DB tests
-        run: uv run pytest tests/db -q
-
-      - name: Run integration tests
-        run: uv run pytest tests/integration -q
-
-      - name: Run golden harness tests
-        run: uv run pytest tests/harness -q
-
-      - name: Run determinism regression
-        run: uv run pytest tests/harness/test_determinism.py -q
+      - name: Run full test suite with coverage gate
+        run: uv run pytest --cov=apps --cov=libs --cov-report=term-missing --cov-fail-under=95 tests/unit tests/db tests/integration tests/harness -q

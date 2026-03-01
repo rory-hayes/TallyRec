@@ -1,0 +1,1 @@
+{"import_drift": {"source_file_id": "src-imp-1", "expected_headers": ["date", "amount", "account"], "observed_headers": ["posted_on", "amount", "acct"], "expected_header_hash": "exp-hash", "observed_header_hash": "obs-hash"}}

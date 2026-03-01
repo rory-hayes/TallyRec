@@ -1,0 +1,1 @@
+{"amount_tolerance": "0.01", "date_window_days": 5, "max_group_size": 5, "enable_one_to_many": true, "enable_many_to_one": true, "require_allowed_account": true}

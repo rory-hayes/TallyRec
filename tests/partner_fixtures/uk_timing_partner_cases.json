@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "tax_between_due_and_visibility",
+      "period_end": "2025-01-31",
+      "as_of_date": "2025-02-23",
+      "tax_amount": "1200.00",
+      "pension_amount": "0.00"
+    },
+    {
+      "name": "pension_between_due_and_visibility",
+      "period_end": "2025-01-31",
+      "as_of_date": "2025-02-24",
+      "tax_amount": "0.00",
+      "pension_amount": "450.00"
+    },
+    {
+      "name": "overdue_after_visibility",
+      "period_end": "2025-01-31",
+      "as_of_date": "2025-02-28",
+      "tax_amount": "900.00",
+      "pension_amount": "350.00"
+    }
+  ]
+}

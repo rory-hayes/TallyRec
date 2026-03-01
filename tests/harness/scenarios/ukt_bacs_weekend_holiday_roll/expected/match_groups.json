@@ -1,0 +1,17 @@
+[
+  {
+    "bank_ids": [
+      "bnk-ukt-roll-1"
+    ],
+    "bank_total": "10000.00",
+    "delta": "0.00",
+    "expected_ids": [
+      "exp-ukt-roll-1"
+    ],
+    "expected_total": "10000.00",
+    "group_kind": "one_to_one",
+    "id": "73b543b1-e8af-59d5-aa44-896d7c58a3eb",
+    "match_confidence": "deterministic",
+    "matched_on": "2025-11-30"
+  }
+]

@@ -18,6 +18,9 @@ class PayrollExpected:
     payment_date: date
     net_amount: Decimal
     employee_ref: str | None = None
+    tax_amount: Decimal = Decimal("0.00")
+    pension_amount: Decimal = Decimal("0.00")
+    other_amount: Decimal = Decimal("0.00")
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,5 +113,51 @@ class ReconResult:
         return {
             "summary": self.summary.to_dict(),
             "match_groups": [group.to_dict() for group in self.match_groups],
+            "variances": [variance.to_dict() for variance in self.variances],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GLJournalLine:
+    id: str
+    entry_date: date
+    account_code: str
+    debit_amount: Decimal
+    credit_amount: Decimal
+    description: str | None = None
+
+    @property
+    def net_amount(self) -> Decimal:
+        return q2(self.credit_amount - self.debit_amount)
+
+
+@dataclass(slots=True)
+class GLTieOutSummary:
+    payroll_totals: dict[str, Decimal]
+    gl_totals: dict[str, Decimal]
+    deltas: dict[str, Decimal]
+    is_balanced: bool
+    status: str
+    rules_used: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "payroll_totals": {key: f"{value:.2f}" for key, value in self.payroll_totals.items()},
+            "gl_totals": {key: f"{value:.2f}" for key, value in self.gl_totals.items()},
+            "deltas": {key: f"{value:.2f}" for key, value in self.deltas.items()},
+            "is_balanced": self.is_balanced,
+            "status": self.status,
+            "rules_used": self.rules_used,
+        }
+
+
+@dataclass(slots=True)
+class GLReconResult:
+    variances: list[Variance]
+    summary: GLTieOutSummary
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "summary": self.summary.to_dict(),
             "variances": [variance.to_dict() for variance in self.variances],
         }

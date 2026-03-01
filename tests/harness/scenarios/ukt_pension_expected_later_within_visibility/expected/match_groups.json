@@ -1,0 +1,17 @@
+[
+  {
+    "bank_ids": [
+      "bnk-ukt-pension-1"
+    ],
+    "bank_total": "10000.00",
+    "delta": "0.00",
+    "expected_ids": [
+      "exp-ukt-pension-1"
+    ],
+    "expected_total": "10000.00",
+    "group_kind": "one_to_one",
+    "id": "d111fbfd-8b1e-55c6-8c5f-ef7f962ea3c7",
+    "match_confidence": "deterministic",
+    "matched_on": "2025-01-31"
+  }
+]

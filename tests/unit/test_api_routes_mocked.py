@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import deque
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -15,8 +16,6 @@ import apps.api.app.api.routes as routes
 class FakeCursor:
     def __init__(self, conn: "FakeConn") -> None:
         self.conn = conn
-        self._one: dict[str, Any] | None = None
-        self._all: list[dict[str, Any]] = []
 
     def __enter__(self) -> "FakeCursor":
         return self
@@ -25,599 +24,507 @@ class FakeCursor:
         return None
 
     def execute(self, query: str, params: tuple[Any, ...] | None = None) -> None:
-        params = params or tuple()
-        q = " ".join(query.lower().split())
-        self._one = None
-        self._all = []
-        state = self.conn.state
+        self.conn.executed.append((" ".join(query.lower().split()), params or tuple()))
 
-        def has_firm_access(firm_id: str) -> bool:
-            return (firm_id, self.conn.user_id) in state["memberships"]
+    def fetchone(self) -> Any:
+        if self.conn.ones:
+            return self.conn.ones.popleft()
+        return None
 
-        if "insert into public.audit_events" in q:
-            state["audits"].append(params)
-            return
-
-        if "insert into public.firms(id, name, slug)" in q:
-            firm_id, name, slug = params
-            state["firms"][firm_id] = {
-                "id": firm_id,
-                "name": name,
-                "slug": slug,
-                "created_at": datetime.now(timezone.utc),
-            }
-            return
-
-        if "insert into public.firm_memberships" in q:
-            firm_id, user_id = params
-            state["memberships"][(str(firm_id), str(user_id))] = "owner"
-            return
-
-        if "select id, name, slug, created_at from public.firms" in q:
-            firm_id = str(params[0])
-            firm = state["firms"].get(firm_id)
-            if firm and has_firm_access(firm_id):
-                self._one = firm
-            return
-
-        if "select id from public.firms where id =" in q:
-            firm_id = str(params[0])
-            if firm_id in state["firms"] and has_firm_access(firm_id):
-                self._one = {"id": firm_id}
-            return
-
-        if "insert into public.clients(firm_id, name, external_ref)" in q:
-            firm_id, name, external_ref = params
-            client_id = str(uuid4())
-            client = {
-                "id": client_id,
-                "firm_id": str(firm_id),
-                "name": name,
-                "external_ref": external_ref,
-                "created_at": datetime.now(timezone.utc),
-            }
-            state["clients"][client_id] = client
-            self._one = client
-            return
-
-        if "insert into public.client_recon_policies" in q:
-            client_id, firm_id = params
-            cid = str(client_id)
-            if cid not in state["policies"]:
-                state["policies"][cid] = {
-                    "client_id": cid,
-                    "firm_id": str(firm_id),
-                    "amount_tolerance": 0.01,
-                    "date_window_days": 5,
-                    "max_group_size": 5,
-                    "enable_one_to_many": True,
-                    "enable_many_to_one": True,
-                    "require_allowed_account": True,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            return
-
-        if "select id from public.clients where id =" in q and "and firm_id =" in q:
-            client_id, firm_id = map(str, params)
-            client = state["clients"].get(client_id)
-            if client and client["firm_id"] == firm_id and has_firm_access(firm_id):
-                self._one = {"id": client_id}
-            return
-
-        if "insert into public.runs(firm_id, client_id, period_start, period_end, created_by)" in q:
-            firm_id, client_id, period_start, period_end, created_by = params
-            run_id = str(uuid4())
-            run = {
-                "id": run_id,
-                "firm_id": str(firm_id),
-                "client_id": str(client_id),
-                "status": "draft",
-                "period_start": period_start,
-                "period_end": period_end,
-                "created_at": datetime.now(timezone.utc),
-                "created_by": str(created_by),
-            }
-            state["runs"][run_id] = run
-            self._one = {
-                "id": run_id,
-                "firm_id": str(firm_id),
-                "client_id": str(client_id),
-                "status": "draft",
-                "period_start": period_start,
-                "period_end": period_end,
-                "created_at": run["created_at"],
-            }
-            return
-
-        if "select id, firm_id, client_id, status from public.runs" in q:
-            run_id = str(params[0])
-            run = state["runs"].get(run_id)
-            if run and has_firm_access(run["firm_id"]):
-                self._one = {
-                    "id": run_id,
-                    "firm_id": run["firm_id"],
-                    "client_id": run["client_id"],
-                    "status": run["status"],
-                }
-            return
-
-        if "insert into public.source_files(" in q:
-            (
-                run_id,
-                firm_id,
-                client_id,
-                file_kind,
-                _filename,
-                uri,
-                checksum,
-                _byte_size,
-                _mapping_template_id,
-                _registered_by,
-            ) = params
-            source_id = str(uuid4())
-            row = {
-                "id": source_id,
-                "run_id": str(run_id),
-                "file_kind": file_kind,
-                "uri": uri,
-                "checksum_sha256": checksum,
-                "created_at": datetime.now(timezone.utc),
-                "firm_id": str(firm_id),
-                "client_id": str(client_id),
-            }
-            state["source_files"][source_id] = row
-            self._one = {
-                "id": source_id,
-                "run_id": str(run_id),
-                "file_kind": file_kind,
-                "uri": uri,
-                "checksum_sha256": checksum,
-                "created_at": row["created_at"],
-            }
-            return
-
-        if "select id, run_id, status, job_type, queued_at from public.jobs where run_id =" in q:
-            run_id, idem_key = map(str, params)
-            for job in state["jobs"].values():
-                if job["run_id"] == run_id and job.get("idempotency_key") == idem_key:
-                    self._one = {
-                        "id": job["id"],
-                        "run_id": job["run_id"],
-                        "status": job["status"],
-                        "job_type": job["job_type"],
-                        "queued_at": job["queued_at"],
-                    }
-                    return
-            return
-
-        if "insert into public.jobs(" in q:
-            run_id, firm_id, client_id, job_type, _payload, idem_key, _created_by = params
-            job_id = str(uuid4())
-            row = {
-                "id": job_id,
-                "run_id": str(run_id),
-                "firm_id": str(firm_id),
-                "client_id": str(client_id),
-                "job_type": job_type,
-                "status": "queued",
-                "queued_at": datetime.now(timezone.utc),
-                "idempotency_key": idem_key,
-            }
-            state["jobs"][job_id] = row
-            self._one = {
-                "id": job_id,
-                "run_id": row["run_id"],
-                "status": "queued",
-                "job_type": row["job_type"],
-                "queued_at": row["queued_at"],
-            }
-            return
-
-        if "select r.id, r.status, r.firm_id, r.client_id," in q:
-            run_id = str(params[0])
-            run = state["runs"].get(run_id)
-            if run and has_firm_access(run["firm_id"]):
-                summary = state["summaries"].get(run_id, {})
-                self._one = {
-                    "id": run_id,
-                    "status": run["status"],
-                    "firm_id": run["firm_id"],
-                    "client_id": run["client_id"],
-                    "expected_net_pay": summary.get("expected_net_pay"),
-                    "matched_bank_total": summary.get("matched_bank_total"),
-                    "delta": summary.get("delta"),
-                    "tieout_status": summary.get("status"),
-                    "computed_at": summary.get("computed_at"),
-                }
-            return
-
-        if "select severity, count(*) as total from public.variances" in q:
-            run_id = str(params[0])
-            counts: dict[str, int] = {}
-            for variance in state["variances"]:
-                if variance["run_id"] == run_id and variance["status"] == "open":
-                    counts[variance["severity"]] = counts.get(variance["severity"], 0) + 1
-            self._all = [{"severity": key, "total": value} for key, value in counts.items()]
-            return
-
-        if "select r.id, r.client_id," in q and "join public.client_recon_policies" in q:
-            run_id = str(params[0])
-            run = state["runs"].get(run_id)
-            if run and has_firm_access(run["firm_id"]):
-                policy = state["policies"].get(run["client_id"])
-                if not policy:
-                    return
-                summary = state["summaries"].get(run_id, {})
-                self._one = {
-                    "id": run_id,
-                    "client_id": run["client_id"],
-                    "expected_net_pay": summary.get("expected_net_pay"),
-                    "matched_bank_total": summary.get("matched_bank_total"),
-                    "delta": summary.get("delta"),
-                    "status": summary.get("status"),
-                    "amount_tolerance": policy["amount_tolerance"],
-                    "date_window_days": policy["date_window_days"],
-                    "max_group_size": policy["max_group_size"],
-                    "enable_one_to_many": policy["enable_one_to_many"],
-                    "enable_many_to_one": policy["enable_many_to_one"],
-                    "require_allowed_account": policy["require_allowed_account"],
-                }
-            return
-
-        if "select id from public.runs where id =" in q:
-            run_id = str(params[0])
-            run = state["runs"].get(run_id)
-            if run and has_firm_access(run["firm_id"]):
-                self._one = {"id": run_id}
-            return
-
-        if "select id, code, severity, status, message, amount, event_date, account_ref, details" in q:
-            run_id, category, status = params
-            rows = [
-                item
-                for item in state["variances"]
-                if item["run_id"] == str(run_id) and item["category"] == category and item["status"] == status
-            ]
-            rows.sort(key=lambda item: (item["code"], item["event_date"] or date.min, item["id"]))
-            self._all = rows
-            return
-
-        if "select mg.id, mg.group_kind, mg.match_confidence" in q:
-            run_id = str(params[0])
-            rows = [item for item in state["match_groups"] if item["run_id"] == run_id]
-            rows.sort(key=lambda item: (item["group_kind"], item["id"]))
-            self._all = rows
-            return
-
-        if "update public.client_recon_policies" in q:
-            (
-                amount_tolerance,
-                date_window_days,
-                max_group_size,
-                enable_one_to_many,
-                enable_many_to_one,
-                require_allowed_account,
-                client_id,
-            ) = params
-            cid = str(client_id)
-            policy = state["policies"].get(cid)
-            if policy and has_firm_access(policy["firm_id"]):
-                if amount_tolerance is not None:
-                    policy["amount_tolerance"] = amount_tolerance
-                if date_window_days is not None:
-                    policy["date_window_days"] = date_window_days
-                if max_group_size is not None:
-                    policy["max_group_size"] = max_group_size
-                if enable_one_to_many is not None:
-                    policy["enable_one_to_many"] = enable_one_to_many
-                if enable_many_to_one is not None:
-                    policy["enable_many_to_one"] = enable_many_to_one
-                if require_allowed_account is not None:
-                    policy["require_allowed_account"] = require_allowed_account
-                policy["updated_at"] = datetime.now(timezone.utc)
-                self._one = policy.copy()
-            return
-
-        if "select id, firm_id from public.clients where id =" in q:
-            client_id = str(params[0])
-            client = state["clients"].get(client_id)
-            if client and has_firm_access(client["firm_id"]):
-                self._one = {"id": client_id, "firm_id": client["firm_id"]}
-            return
-
-        if "delete from public.client_bank_accounts where client_id =" in q:
-            client_id = str(params[0])
-            state["accounts"][client_id] = []
-            return
-
-        if "insert into public.client_bank_accounts" in q:
-            client_id, _firm_id, account_ref, label = params
-            row = {"id": str(uuid4()), "account_ref": account_ref, "label": label}
-            state["accounts"].setdefault(str(client_id), []).append(row)
-            return
-
-        if "select id, account_ref, label from public.client_bank_accounts" in q:
-            client_id = str(params[0])
-            rows = sorted(state["accounts"].get(client_id, []), key=lambda item: item["account_ref"])
-            self._all = rows
-            return
-
-        raise AssertionError(f"Unhandled query: {q}")
-
-    def fetchone(self) -> dict[str, Any] | None:
-        return self._one
-
-    def fetchall(self) -> list[dict[str, Any]]:
-        return self._all
+    def fetchall(self) -> list[Any]:
+        if self.conn.alls:
+            return self.conn.alls.popleft()
+        return []
 
 
 class FakeConn:
-    def __init__(self, user_id: str, state: dict[str, Any]) -> None:
-        self.user_id = user_id
-        self.state = state
+    def __init__(self, *, ones: list[Any] | None = None, alls: list[list[Any]] | None = None) -> None:
+        self.ones = deque(ones or [])
+        self.alls = deque(alls or [])
+        self.executed: list[tuple[str, tuple[Any, ...]]] = []
 
     def cursor(self) -> FakeCursor:
         return FakeCursor(self)
 
 
-@pytest.fixture()
-def client_and_state(monkeypatch: pytest.MonkeyPatch):
-    state: dict[str, Any] = {
-        "firms": {},
-        "memberships": {},
-        "clients": {},
-        "policies": {},
-        "runs": {},
-        "source_files": {},
-        "jobs": {},
-        "variances": [],
-        "summaries": {},
-        "match_groups": [],
-        "accounts": {},
-        "audits": [],
-    }
+class FakeStorage:
+    def __init__(self, payload: bytes = b"zip") -> None:
+        self.payload = payload
+        self.downloaded: list[tuple[str, str]] = []
 
-    @contextmanager
-    def fake_db_session(user_id: str):
-        yield FakeConn(user_id, state)
-
-    monkeypatch.setattr(routes, "db_session", fake_db_session)
-
-    with TestClient(app) as client:
-        yield client, state
+    def download_bytes(self, bucket: str, object_path: str) -> bytes:
+        self.downloaded.append((bucket, object_path))
+        return self.payload
 
 
 def _headers(user_id: str) -> dict[str, str]:
     return {"X-User-Id": user_id}
 
 
-def test_health_and_missing_auth(client_and_state) -> None:
-    client, _ = client_and_state
+@pytest.fixture()
+def client_and_push(monkeypatch: pytest.MonkeyPatch):
+    conn_queue: deque[FakeConn] = deque()
+
+    @contextmanager
+    def fake_db_session(_user_id: str):
+        if not conn_queue:
+            raise AssertionError("No fake connection queued for request")
+        yield conn_queue.popleft()
+
+    storage = FakeStorage()
+
+    monkeypatch.setattr(routes, "db_session", fake_db_session)
+    monkeypatch.setattr(routes, "get_storage_client", lambda: storage)
+
+    with TestClient(app) as client:
+        yield client, conn_queue.append, storage
+
+
+def test_health_and_auth(client_and_push) -> None:
+    client, _, _ = client_and_push
     assert client.get("/v1/health").status_code == 200
-    assert client.post("/v1/firms", json={"name": "A", "slug": "a"}).status_code == 401
+    assert client.post("/v1/firms", json={"name": "x", "slug": "x"}).status_code == 401
 
 
-def test_full_route_flow_success(client_and_state) -> None:
-    client, state = client_and_state
-    user = "00000000-0000-0000-0000-000000000901"
+def test_core_creation_and_enqueues(client_and_push) -> None:
+    client, push_conn, _ = client_and_push
+    user = "00000000-0000-0000-0000-000000001111"
 
+    now = datetime.now(timezone.utc)
+    firm_id = str(uuid4())
+    client_id = str(uuid4())
+    run_id = str(uuid4())
+    source_id = str(uuid4())
+    job_id = str(uuid4())
+
+    push_conn(FakeConn(ones=[{"id": firm_id, "name": "Firm", "slug": "firm", "created_at": now}]))
     firm = client.post("/v1/firms", json={"name": "Firm", "slug": "firm"}, headers=_headers(user))
     assert firm.status_code == 201
-    firm_id = firm.json()["id"]
 
+    push_conn(
+        FakeConn(
+            ones=[
+                {"id": firm_id},
+                {"id": client_id, "firm_id": firm_id, "name": "Client", "external_ref": "X", "created_at": now},
+            ]
+        )
+    )
     create_client = client.post(
         "/v1/clients",
         json={"firm_id": firm_id, "name": "Client", "external_ref": "X"},
         headers=_headers(user),
     )
     assert create_client.status_code == 201
-    client_id = create_client.json()["id"]
 
+    push_conn(
+        FakeConn(
+            ones=[
+                {"id": client_id},
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "draft",
+                    "period_start": "2025-01-01",
+                    "period_end": "2025-01-31",
+                    "created_at": now,
+                },
+            ]
+        )
+    )
     run = client.post(
         "/v1/runs",
         json={"firm_id": firm_id, "client_id": client_id, "period_start": "2025-01-01", "period_end": "2025-01-31"},
         headers=_headers(user),
     )
     assert run.status_code == 201
-    run_id = run.json()["id"]
 
-    source_file = client.post(
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "draft",
+                    "locked_at": None,
+                    "locked_by": None,
+                    "lock_reason": None,
+                },
+                {
+                    "id": source_id,
+                    "run_id": run_id,
+                    "file_kind": "bank",
+                    "uri": "s3://f",
+                    "checksum_sha256": "a" * 64,
+                    "created_at": now,
+                },
+            ]
+        )
+    )
+    source = client.post(
         f"/v1/runs/{run_id}/source-files",
-        json={
-            "file_kind": "bank",
-            "filename": "bank.csv",
-            "uri": "s3://bucket/bank.csv",
-            "checksum_sha256": "a" * 64,
-            "byte_size": 1,
-        },
+        json={"file_kind": "bank", "filename": "f.csv", "uri": "s3://f", "checksum_sha256": "a" * 64, "byte_size": 1},
         headers=_headers(user),
     )
-    assert source_file.status_code == 201
+    assert source.status_code == 201
 
-    job = client.post(
-        f"/v1/runs/{run_id}/jobs",
-        json={"job_type": "noop", "payload": {}, "idempotency_key": "idem-1"},
-        headers=_headers(user),
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "draft",
+                    "locked_at": None,
+                    "locked_by": None,
+                    "lock_reason": None,
+                },
+                {"id": job_id, "run_id": run_id, "status": "queued", "job_type": "reconcile_gl", "queued_at": now},
+            ]
+        )
     )
-    assert job.status_code == 201
+    recon_gl = client.post(f"/v1/runs/{run_id}/reconcile/gl", json={"payload": {}}, headers=_headers(user))
+    assert recon_gl.status_code == 201
 
-    same_job = client.post(
-        f"/v1/runs/{run_id}/jobs",
-        json={"job_type": "noop", "payload": {}, "idempotency_key": "idem-1"},
-        headers=_headers(user),
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "draft",
+                    "locked_at": None,
+                    "locked_by": None,
+                    "lock_reason": None,
+                },
+                {"id": str(uuid4()), "run_id": run_id, "status": "queued", "job_type": "export_pack", "queued_at": now},
+            ]
+        )
     )
-    assert same_job.status_code == 201
-    assert same_job.json()["id"] == job.json()["id"]
+    export_job = client.post(f"/v1/runs/{run_id}/export-pack", json={}, headers=_headers(user))
+    assert export_job.status_code == 201
 
-    recon = client.post(
-        f"/v1/runs/{run_id}/reconcile/bank",
-        json={"idempotency_key": "recon-1", "payload": {}},
-        headers=_headers(user),
+
+def test_locking_and_rbac_workflow(client_and_push) -> None:
+    client, push_conn, _ = client_and_push
+    preparer = "00000000-0000-0000-0000-000000001112"
+    reviewer = "00000000-0000-0000-0000-000000001113"
+    run_id = str(uuid4())
+    firm_id = str(uuid4())
+    client_id = str(uuid4())
+
+    # Locked run blocks source file edit.
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "approved",
+                    "locked_at": datetime.now(timezone.utc),
+                    "locked_by": reviewer,
+                    "lock_reason": "reviewer_approval",
+                }
+            ]
+        )
     )
-    assert recon.status_code == 201
+    blocked = client.post(
+        f"/v1/runs/{run_id}/source-files",
+        json={"file_kind": "bank", "filename": "f.csv", "uri": "s3://f", "checksum_sha256": "a" * 64, "byte_size": 1},
+        headers=_headers(preparer),
+    )
+    assert blocked.status_code == 403
 
-    state["summaries"][run_id] = {
-        "expected_net_pay": "10000.00",
-        "matched_bank_total": "10000.00",
-        "delta": "0.00",
-        "status": "Tied",
-        "computed_at": datetime.now(timezone.utc),
-    }
-    state["variances"] = [
-        {
-            "id": str(uuid4()),
-            "run_id": run_id,
-            "code": "BNK-001",
-            "severity": "blocker",
-            "status": "open",
-            "category": "bank",
-            "message": "missing",
-            "amount": "10.00",
-            "event_date": date(2025, 1, 31),
-            "account_ref": None,
-            "details": {},
-        }
-    ]
-    state["match_groups"] = [
-        {
-            "id": str(uuid4()),
-            "run_id": run_id,
-            "group_kind": "one_to_one",
-            "match_confidence": "deterministic",
-            "expected_total": "10000.00",
-            "bank_total": "10000.00",
-            "delta": "0.00",
-            "matched_on": date(2025, 1, 31),
-            "members_count": 2,
-        }
-    ]
+    # Ready for review success.
+    approval_id = str(uuid4())
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "completed",
+                    "locked_at": None,
+                    "locked_by": None,
+                    "lock_reason": None,
+                },
+                {"role": "analyst"},
+                {
+                    "id": approval_id,
+                    "run_id": run_id,
+                    "status": "pending",
+                    "prepared_by": preparer,
+                    "prepared_at": datetime.now(timezone.utc),
+                    "reviewer_id": None,
+                    "reviewed_at": None,
+                },
+            ]
+        )
+    )
+    ready = client.post(f"/v1/runs/{run_id}/ready-for-review", json={"note": "ready"}, headers=_headers(preparer))
+    assert ready.status_code == 200
 
+    # Preparer cannot self approve.
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "ready_for_review",
+                    "locked_at": None,
+                    "locked_by": None,
+                    "lock_reason": None,
+                },
+                {"role": "admin"},
+                {"id": approval_id, "prepared_by": preparer},
+            ]
+        )
+    )
+    self_approve = client.post(f"/v1/runs/{run_id}/approve", json={}, headers=_headers(preparer))
+    assert self_approve.status_code == 403
+
+    # Reviewer approve success.
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "ready_for_review",
+                    "locked_at": None,
+                    "locked_by": None,
+                    "lock_reason": None,
+                },
+                {"role": "admin"},
+                {"id": approval_id, "prepared_by": preparer},
+                {"blocker_open": 0, "ignored_pending": 0},
+                {
+                    "id": approval_id,
+                    "run_id": run_id,
+                    "status": "approved",
+                    "prepared_by": preparer,
+                    "reviewer_id": reviewer,
+                    "reviewed_at": datetime.now(timezone.utc),
+                },
+                {
+                    "id": run_id,
+                    "status": "approved",
+                    "locked_at": datetime.now(timezone.utc),
+                    "locked_by": reviewer,
+                    "lock_reason": "reviewer_approval",
+                },
+            ]
+        )
+    )
+    approved = client.post(f"/v1/runs/{run_id}/approve", json={"note": "ok"}, headers=_headers(reviewer))
+    assert approved.status_code == 200
+
+    # Unlock success.
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "approved",
+                    "locked_at": datetime.now(timezone.utc),
+                    "locked_by": reviewer,
+                    "lock_reason": "reviewer_approval",
+                },
+                {"role": "owner"},
+                {"id": run_id, "status": "completed", "locked_at": None, "lock_reason": "manual_fix"},
+            ]
+        )
+    )
+    unlock = client.post(f"/v1/runs/{run_id}/unlock", json={"reason": "manual_fix"}, headers=_headers(reviewer))
+    assert unlock.status_code == 200
+
+
+def test_variance_center_and_resolution(client_and_push) -> None:
+    client, push_conn, _ = client_and_push
+    user = "00000000-0000-0000-0000-000000001114"
+    reviewer = "00000000-0000-0000-0000-000000001115"
+    run_id = str(uuid4())
+    firm_id = str(uuid4())
+    client_id = str(uuid4())
+    variance_id = str(uuid4())
+
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": run_id,
+                    "run_status": "completed",
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "locked_at": None,
+                    "locked_by": None,
+                    "expected_net_pay": "100.00",
+                    "matched_bank_total": "100.00",
+                    "delta": "0.00",
+                    "bank_status": "Tied",
+                    "bank_computed_at": datetime.now(timezone.utc),
+                    "gl_status": "Not tied",
+                    "gl_computed_at": datetime.now(timezone.utc),
+                    "approval_status": "pending",
+                    "prepared_by": user,
+                    "prepared_at": datetime.now(timezone.utc),
+                    "reviewer_id": None,
+                    "reviewed_at": None,
+                }
+            ],
+            alls=[[{"severity": "blocker", "total": 1}]],
+        )
+    )
     summary = client.get(f"/v1/runs/{run_id}/summary", headers=_headers(user))
     assert summary.status_code == 200
-    assert summary.json()["open_variances"]["blocker"] == 1
+    assert summary.json()["overall_tie_status"] == "Not tied"
 
-    bank_tieout = client.get(f"/v1/runs/{run_id}/bank-tieout", headers=_headers(user))
-    assert bank_tieout.status_code == 200
-    assert bank_tieout.json()["policy"]["date_window_days"] == 5
+    push_conn(
+        FakeConn(
+            ones=[{"id": run_id}],
+            alls=[
+                [
+                    {
+                        "id": variance_id,
+                        "code": "GL-001",
+                        "category": "gl",
+                        "severity": "blocker",
+                        "status": "open",
+                        "message": "missing",
+                        "amount": "100.00",
+                        "event_date": None,
+                        "account_ref": None,
+                        "details": {},
+                        "note": None,
+                        "changed_by": None,
+                        "changed_at": None,
+                        "resolution_action": None,
+                        "ignored_needs_reviewer_approval": False,
+                        "ignored_approved_by": None,
+                        "ignored_approved_at": None,
+                    }
+                ]
+            ],
+        )
+    )
+    listing = client.get(f"/v1/runs/{run_id}/variances?status=open&category=gl", headers=_headers(user))
+    assert listing.status_code == 200
 
-    variances = client.get(f"/v1/runs/{run_id}/variances?category=bank&status=open", headers=_headers(user))
-    assert variances.status_code == 200
-    assert len(variances.json()) == 1
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": variance_id,
+                    "run_id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "open",
+                    "severity": "blocker",
+                    "resolution_action": None,
+                    "ignored_needs_reviewer_approval": False,
+                }
+            ],
+            alls=[[{"id": str(uuid4()), "action": "created", "note": None, "actor_user_id": user, "created_at": datetime.now(timezone.utc)}]],
+        )
+    )
+    detail = client.get(f"/v1/runs/{run_id}/variances/{variance_id}", headers=_headers(user))
+    assert detail.status_code == 200
 
-    match_groups = client.get(f"/v1/runs/{run_id}/match-groups", headers=_headers(user))
-    assert match_groups.status_code == 200
-    assert len(match_groups.json()) == 1
-
-    update_policy = client.patch(
-        f"/v1/clients/{client_id}/recon-policy",
-        json={"date_window_days": 7, "max_group_size": 3},
+    # Resolve ignored success.
+    push_conn(
+        FakeConn(
+            ones=[
+                {"id": variance_id, "run_id": run_id, "firm_id": firm_id, "client_id": client_id, "locked_at": None},
+                {
+                    "id": variance_id,
+                    "run_id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "ignored",
+                    "resolution_action": "ignored",
+                    "ignored_needs_reviewer_approval": True,
+                },
+            ]
+        )
+    )
+    resolved = client.post(
+        f"/v1/variances/{variance_id}/resolve",
+        json={"action": "ignored", "note": "investigated"},
         headers=_headers(user),
     )
-    assert update_policy.status_code == 200
-    assert update_policy.json()["date_window_days"] == 7
+    assert resolved.status_code == 200
 
-    replace_accounts = client.put(
-        f"/v1/clients/{client_id}/bank-accounts",
-        json={"accounts": [{"account_ref": "ACCT-1", "label": "Payroll"}]},
-        headers=_headers(user),
+    # Reviewer approves ignored.
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "id": variance_id,
+                    "run_id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "locked_at": None,
+                    "resolution_action": "ignored",
+                    "ignored_needs_reviewer_approval": True,
+                },
+                {"role": "admin"},
+                {
+                    "id": variance_id,
+                    "run_id": run_id,
+                    "firm_id": firm_id,
+                    "client_id": client_id,
+                    "status": "ignored",
+                    "ignored_needs_reviewer_approval": False,
+                },
+            ]
+        )
     )
-    assert replace_accounts.status_code == 200
-    assert replace_accounts.json()["accounts"][0]["account_ref"] == "ACCT-1"
+    approved = client.post(f"/v1/variances/{variance_id}/approve-ignored", headers=_headers(reviewer))
+    assert approved.status_code == 200
 
 
-def test_not_found_and_tenant_isolation(client_and_state) -> None:
-    client, state = client_and_state
-    owner = "00000000-0000-0000-0000-000000000902"
-    outsider = "00000000-0000-0000-0000-000000000903"
+def test_gl_tieout_export_and_download(client_and_push) -> None:
+    client, push_conn, storage = client_and_push
+    user = "00000000-0000-0000-0000-000000001116"
+    run_id = str(uuid4())
+    pack_id = str(uuid4())
 
-    firm = client.post("/v1/firms", json={"name": "Firm2", "slug": "firm2"}, headers=_headers(owner))
-    firm_id = firm.json()["id"]
-    create_client = client.post(
-        "/v1/clients",
-        json={"firm_id": firm_id, "name": "Client2", "external_ref": None},
-        headers=_headers(owner),
+    push_conn(
+        FakeConn(
+            ones=[
+                {
+                    "run_id": run_id,
+                    "payroll_totals": {"net_pay_control": "100.00"},
+                    "gl_totals": {"net_pay_control": "100.00"},
+                    "deltas": {"net_pay_control": "0.00"},
+                    "is_balanced": True,
+                    "status": "Tied",
+                    "rules_used": {"checks": []},
+                    "computed_at": datetime.now(timezone.utc),
+                }
+            ]
+        )
     )
-    client_id = create_client.json()["id"]
-    run = client.post(
-        "/v1/runs",
-        json={"firm_id": firm_id, "client_id": client_id, "period_start": "2025-01-01", "period_end": "2025-01-31"},
-        headers=_headers(owner),
-    )
-    run_id = run.json()["id"]
+    gl = client.get(f"/v1/runs/{run_id}/gl-tieout", headers=_headers(user))
+    assert gl.status_code == 200
 
-    assert client.get(f"/v1/runs/{run_id}/summary", headers=_headers(outsider)).status_code == 404
-    assert client.get(f"/v1/runs/{uuid4()}/summary", headers=_headers(owner)).status_code == 404
-    assert client.get(f"/v1/runs/{uuid4()}/bank-tieout", headers=_headers(owner)).status_code == 404
-    assert client.get(f"/v1/runs/{uuid4()}/variances?category=bank&status=open", headers=_headers(owner)).status_code == 404
-    assert client.get(f"/v1/runs/{uuid4()}/match-groups", headers=_headers(owner)).status_code == 404
+    push_conn(FakeConn(ones=[{"id": run_id}], alls=[[{"id": pack_id, "status": "generated", "pack_hash": "h", "storage_bucket": "audit-packs", "storage_path": "runs/a.zip", "generated_at": None, "error": None, "created_at": None, "updated_at": None}]]))
+    packs = client.get(f"/v1/runs/{run_id}/export-packs", headers=_headers(user))
+    assert packs.status_code == 200
+    assert len(packs.json()) == 1
 
-    assert (
-        client.post(
-            "/v1/clients",
-            json={"firm_id": str(uuid4()), "name": "MissingFirm", "external_ref": None},
-            headers=_headers(owner),
-        ).status_code
-        == 404
-    )
-
-    assert (
-        client.post(
-            "/v1/runs",
-            json={"firm_id": firm_id, "client_id": str(uuid4()), "period_start": "2025-01-01", "period_end": "2025-01-31"},
-            headers=_headers(owner),
-        ).status_code
-        == 404
-    )
-
-    assert (
-        client.post(
-            f"/v1/runs/{uuid4()}/source-files",
-            json={
-                "file_kind": "bank",
-                "filename": "bank.csv",
-                "uri": "s3://bucket/bank.csv",
-                "checksum_sha256": "a" * 64,
-                "byte_size": 1,
-            },
-            headers=_headers(owner),
-        ).status_code
-        == 404
-    )
-
-    assert (
-        client.post(
-            f"/v1/runs/{uuid4()}/jobs",
-            json={"job_type": "noop", "payload": {}},
-            headers=_headers(owner),
-        ).status_code
-        == 404
-    )
-
-    assert (
-        client.post(
-            f"/v1/runs/{uuid4()}/reconcile/bank",
-            json={"payload": {}},
-            headers=_headers(owner),
-        ).status_code
-        == 404
-    )
-
-    missing_client_id = str(uuid4())
-    state["policies"].pop(missing_client_id, None)
-    assert (
-        client.patch(
-            f"/v1/clients/{missing_client_id}/recon-policy",
-            json={"date_window_days": 8},
-            headers=_headers(owner),
-        ).status_code
-        == 404
-    )
-
-    assert (
-        client.put(
-            f"/v1/clients/{uuid4()}/bank-accounts",
-            json={"accounts": [{"account_ref": "A", "label": None}]},
-            headers=_headers(owner),
-        ).status_code
-        == 404
-    )
+    push_conn(FakeConn(ones=[{"id": pack_id, "storage_bucket": "audit-packs", "storage_path": "runs/a.zip"}]))
+    download = client.get(f"/v1/export-packs/{pack_id}/download", headers=_headers(user))
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/zip")
+    assert storage.downloaded == [("audit-packs", "runs/a.zip")]

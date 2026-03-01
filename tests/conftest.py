@@ -13,7 +13,12 @@ from apps.api.app.main import app
 
 
 PUBLIC_TABLES = [
+    "run_batch_items",
+    "run_batches",
+    "variance_resolution_events",
+    "run_gl_tieout_summaries",
     "run_bank_tieout_summaries",
+    "run_import_health_summaries",
     "export_packs",
     "audit_events",
     "approvals",
@@ -27,6 +32,8 @@ PUBLIC_TABLES = [
     "source_files",
     "mapping_templates",
     "runs",
+    "client_uk_timing_policies",
+    "client_gl_bucket_accounts",
     "client_bank_accounts",
     "client_recon_policies",
     "clients",

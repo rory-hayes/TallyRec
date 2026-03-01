@@ -1,0 +1,17 @@
+[
+  {
+    "bank_ids": [
+      "bnk-ukt-tax-1"
+    ],
+    "bank_total": "10000.00",
+    "delta": "0.00",
+    "expected_ids": [
+      "exp-ukt-tax-1"
+    ],
+    "expected_total": "10000.00",
+    "group_kind": "one_to_one",
+    "id": "bf9f9178-6a01-5962-89a5-90b52b8099a8",
+    "match_confidence": "deterministic",
+    "matched_on": "2025-01-31"
+  }
+]

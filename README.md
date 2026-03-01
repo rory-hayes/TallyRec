@@ -1,6 +1,13 @@
-# TallyRec Sprint 2
+# TallyRec Sprint 4
 
-Deterministic PayrollExpected ↔ BankTransactions reconciliation v1.
+Deterministic payroll reconciliation foundations with:
+
+- PayrollExpected ↔ BankTransactions tie-out (Sprint 2)
+- PayrollExpected ↔ GLJournal tie-out (Sprint 3)
+- Bureau-first dashboard + batch runs + UK timing pack (Sprint 4)
+- Variance resolution workflow + reviewer approval
+- Immutable run locking on approval
+- Deterministic audit pack export
 
 ## Stack
 
@@ -9,7 +16,7 @@ Deterministic PayrollExpected ↔ BankTransactions reconciliation v1.
 - Worker queue processor (`apps/worker`)
 - Deterministic reconciliation engine (`libs/core/engine`)
 - Golden regression harness (`tests/harness/scenarios` + `scripts/run_golden.py`)
-- Next.js read-only run UI (`apps/web`)
+- Next.js run UI + Variance Center (`apps/web`)
 
 ## Local Commands
 
@@ -34,6 +41,8 @@ uv run pytest tests/unit -q
 uv run pytest tests/harness -q
 uv run pytest tests/db -q
 uv run pytest tests/integration -q
+uv run pytest tests/harness/test_determinism.py -q
+uv run pytest --cov=apps --cov=libs --cov-report=term-missing --cov-fail-under=95 tests/unit tests/db tests/integration tests/harness -q
 ```
 
 ```bash
@@ -48,12 +57,28 @@ uv run python scripts/run_golden.py
 - `POST /v1/runs/{run_id}/source-files`
 - `POST /v1/runs/{run_id}/jobs`
 - `POST /v1/runs/{run_id}/reconcile/bank`
+- `POST /v1/runs/{run_id}/reconcile/gl`
+- `POST /v1/runs/{run_id}/export-pack`
 - `GET /v1/runs/{run_id}/summary`
 - `GET /v1/runs/{run_id}/bank-tieout`
+- `GET /v1/runs/{run_id}/gl-tieout`
 - `GET /v1/runs/{run_id}/variances?category=bank&status=open`
+- `GET /v1/runs/{run_id}/variances/{variance_id}`
+- `POST /v1/variances/{variance_id}/resolve`
+- `POST /v1/variances/{variance_id}/approve-ignored`
 - `GET /v1/runs/{run_id}/match-groups`
 - `PATCH /v1/clients/{client_id}/recon-policy`
+- `PATCH /v1/clients/{client_id}/uk-timing-policy`
 - `PUT /v1/clients/{client_id}/bank-accounts`
+- `PUT /v1/clients/{client_id}/gl-bucket-accounts`
+- `POST /v1/batches/runs`
+- `GET /v1/batches/{batch_id}`
+- `GET /v1/dashboard`
+- `POST /v1/runs/{run_id}/ready-for-review`
+- `POST /v1/runs/{run_id}/approve`
+- `POST /v1/runs/{run_id}/unlock`
+- `GET /v1/runs/{run_id}/export-packs`
+- `GET /v1/export-packs/{export_pack_id}/download`
 
 All authenticated API calls expect header: `X-User-Id: <uuid>`.
 

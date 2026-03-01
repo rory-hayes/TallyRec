@@ -61,6 +61,7 @@ class RegisterSourceFileRequest(StrictModel):
     checksum_sha256: str = Field(min_length=64, max_length=64)
     byte_size: int = Field(ge=0)
     mapping_template_id: UUID | None = None
+    observed_headers: list[str] | None = None
 
 
 class RegisterSourceFileResponse(StrictModel):
@@ -89,6 +90,12 @@ class EnqueueJobResponse(StrictModel):
 class ReconcileBankRequest(StrictModel):
     idempotency_key: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+    as_of_date: date | None = None
+
+
+class ReconcileGLRequest(StrictModel):
+    idempotency_key: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateReconPolicyRequest(StrictModel):
@@ -107,3 +114,97 @@ class BankAccountItem(StrictModel):
 
 class PutBankAccountsRequest(StrictModel):
     accounts: list[BankAccountItem]
+
+
+class UpsertGLBucketAccountsRequest(StrictModel):
+    net_pay_control: list[str] = Field(default_factory=list)
+    taxes: list[str] = Field(default_factory=list)
+    pension: list[str] = Field(default_factory=list)
+    other: list[str] = Field(default_factory=list)
+
+
+class ResolveVarianceRequest(StrictModel):
+    action: str
+    note: str
+
+
+class ReadyForReviewRequest(StrictModel):
+    note: str | None = None
+
+
+class ApproveRunRequest(StrictModel):
+    note: str | None = None
+
+
+class UnlockRunRequest(StrictModel):
+    reason: str
+
+
+class EnqueueExportPackRequest(StrictModel):
+    idempotency_key: str | None = None
+
+
+class CreateBatchRunsRequest(StrictModel):
+    firm_id: UUID
+    period_start: date
+    period_end: date
+    client_ids: list[UUID] = Field(min_length=1)
+    as_of_date: date | None = None
+
+
+class BatchRunItemResponse(StrictModel):
+    id: UUID
+    client_id: UUID
+    run_id: UUID | None
+    status: str
+    bank_job_id: UUID | None
+    gl_job_id: UUID | None
+    error: dict[str, Any]
+    updated_at: datetime
+
+
+class BatchRunResponse(StrictModel):
+    id: UUID
+    firm_id: UUID
+    period_start: date
+    period_end: date
+    status: str
+    requested_clients: int
+    created_runs: int
+    queued_jobs: int
+    succeeded_runs: int
+    failed_runs: int
+    options: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+    items: list[BatchRunItemResponse]
+
+
+class DashboardRunItem(StrictModel):
+    run_id: UUID
+    client_id: UUID
+    client_name: str
+    run_status: str
+    overall_tie_status: str
+    open_blockers: int
+    open_review: int
+    payday_date: date | None
+    must_close_by_date: date | None
+    import_health_band: str | None
+    latest_job_status: str | None
+    sla_reminder_state: str | None
+
+
+class DashboardResponse(StrictModel):
+    counts_by_status: dict[str, int]
+    counts_by_due_bucket: dict[str, int]
+    runs: list[DashboardRunItem]
+    total: int
+
+
+class UpdateUKTimingPolicyRequest(StrictModel):
+    tax_due_day: int | None = Field(default=None, ge=1, le=31)
+    pension_due_day: int | None = Field(default=None, ge=1, le=31)
+    bacs_visibility_business_days: int | None = Field(default=None, ge=0, le=10)
+    holiday_calendar: str | None = None
+    enabled: bool | None = None

@@ -13,3 +13,4 @@ out/
 coverage.xml
 htmlcov/
 .coverage
+.vercel

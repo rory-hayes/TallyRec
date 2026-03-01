@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import asdict
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
-from libs.core.engine import BankTransaction, PayrollExpected, ReconPolicy, reconcile_bank
+from libs.core.engine import BankTransaction, PayrollExpected, ReconPolicy, UKTimingPolicy, Variance, build_timing_variances, reconcile_bank
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -26,6 +26,9 @@ def load_scenario(scenario_dir: Path) -> tuple[list[PayrollExpected], list[BankT
             employee_ref=row.get("employee_ref") or None,
             payment_date=date.fromisoformat(row["payment_date"]),
             net_amount=Decimal(row["net_amount"]),
+            tax_amount=Decimal(row.get("tax_amount") or "0.00"),
+            pension_amount=Decimal(row.get("pension_amount") or "0.00"),
+            other_amount=Decimal(row.get("other_amount") or "0.00"),
         )
         for row in payroll_rows
     ]
@@ -66,6 +69,9 @@ def load_scenario(scenario_dir: Path) -> tuple[list[PayrollExpected], list[BankT
 
 def run_scenario(scenario_dir: Path, run_id: str = "golden-run") -> dict:
     payroll_expected, bank_transactions, policy, allowed_accounts = load_scenario(scenario_dir)
+    context_path = scenario_dir / "inputs" / "context.json"
+    context = json.loads(context_path.read_text(encoding="utf-8")) if context_path.exists() else {}
+
     result = reconcile_bank(
         run_id=run_id,
         expected_items=payroll_expected,
@@ -73,6 +79,54 @@ def run_scenario(scenario_dir: Path, run_id: str = "golden-run") -> dict:
         policy=policy,
         allowed_accounts=allowed_accounts,
     )
+    if "timing" in context:
+        timing = context["timing"]
+        timing_variances, _ = build_timing_variances(
+            run_id=run_id,
+            payroll_expected=payroll_expected,
+            period_end=date.fromisoformat(timing["period_end"]),
+            as_of_date=date.fromisoformat(timing["as_of_date"]),
+            policy=UKTimingPolicy(
+                tax_due_day=int(timing.get("tax_due_day", 22)),
+                pension_due_day=int(timing.get("pension_due_day", 22)),
+                bacs_visibility_business_days=int(timing.get("bacs_visibility_business_days", 3)),
+                holiday_calendar=timing.get("holiday_calendar", "GB"),
+                enabled=bool(timing.get("enabled", True)),
+            ),
+        )
+        result.variances.extend(timing_variances)
+
+    if "import_drift" in context:
+        drift = context["import_drift"]
+        result.variances.append(
+            Variance(
+                id=str(uuid5(NAMESPACE_URL, f"{run_id}:IMP-001:{drift.get('source_file_id', 'source-file')}")),
+                code="IMP-001",
+                category="import",
+                severity="blocker",
+                status="open",
+                message="Source file headers drifted from expected mapping template",
+                details={
+                    "source_file_id": drift.get("source_file_id"),
+                    "expected_headers": drift.get("expected_headers", []),
+                    "observed_headers": drift.get("observed_headers", []),
+                    "expected_header_hash": drift.get("expected_header_hash"),
+                    "observed_header_hash": drift.get("observed_header_hash"),
+                },
+            )
+        )
+
+    result.variances.sort(key=lambda variance: (variance.code, variance.event_date or date.min, variance.id))
+    has_blocker = any(item.severity == "blocker" and item.status == "open" for item in result.variances)
+    has_review = any(item.severity == "review" and item.status == "open" for item in result.variances)
+    if has_blocker:
+        result.summary.status = "Not tied"
+    elif has_review:
+        result.summary.status = "Needs review"
+    elif abs(result.summary.delta) <= policy.amount_tolerance:
+        result.summary.status = "Tied"
+    else:
+        result.summary.status = "Not tied"
     return result.to_dict()
 
 
